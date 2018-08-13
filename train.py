@@ -10,6 +10,7 @@ import numpy as np
 
 from myimgfolder import TrainImageFolder
 from colornet import ColorNet
+from tensorboardX import SummaryWriter 
 
 original_transform = transforms.Compose([
     transforms.Scale(256),
@@ -18,8 +19,9 @@ original_transform = transforms.Compose([
     #transforms.ToTensor()
 ])
 
-have_cuda = torch.cuda.is_available()
+# have_cuda = torch.cuda.is_available()
 epochs = 1
+writer = SummaryWriter("MyTest")
 
 data_dir = "../images256/"
 train_set = TrainImageFolder(data_dir, original_transform)
@@ -27,10 +29,16 @@ train_set_size = len(train_set)
 train_set_classes = train_set.classes
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=32, shuffle=True, num_workers=4)
 color_model = ColorNet()
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+color_model = nn.DataParallel(color_model)
+color_model.to(device)
+
 if os.path.exists('./colornet_params.pkl'):
     color_model.load_state_dict(torch.load('colornet_params.pkl'))
-if have_cuda:
-    color_model.cuda()
+# if have_cuda:
+#     color_model.cuda()
 optimizer = optim.Adadelta(color_model.parameters())
 
 
@@ -42,10 +50,13 @@ def train(epoch):
             messagefile = open('./message.txt', 'a')
             original_img = data[0].unsqueeze(1).float()
             img_ab = data[1].float()
-            if have_cuda:
-                original_img = original_img.cuda()
-                img_ab = img_ab.cuda()
-                classes = classes.cuda()
+            original_img.to(device)
+            img_ab = img_ab.to(device)
+            classes = classes.to(device)
+            # if have_cuda:
+            #     original_img = original_img.cuda()
+            #     img_ab = img_ab.cuda()
+            #     classes = classes.cuda()
             original_img = Variable(original_img)
             img_ab = Variable(img_ab)
             classes = Variable(classes)
@@ -64,11 +75,12 @@ def train(epoch):
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.data[0])
                 messagefile.write(message)
-                torch.save(color_model.state_dict(), 'colornet_params.pkl')
+                writer.add_scalar("Loss",loss.item(),batch_idx)
+                # torch.save(color_model.state_dict(), 'colornet_params.pkl')
             messagefile.close()
-                # print('Train Epoch: {}[{}/{}({:.0f}%)]\tLoss: {:.9f}\n'.format(
-                #     epoch, batch_idx * len(data), len(train_loader.dataset),
-                #     100. * batch_idx / len(train_loader), loss.data[0]))
+                print('Train Epoch: {}[{}/{}({:.0f}%)]\tLoss: {:.9f}\n'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                    100. * batch_idx / len(train_loader), loss.data[0]))
     except Exception:
         logfile = open('log.txt', 'w')
         logfile.write(traceback.format_exc())
